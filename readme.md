@@ -1,3 +1,14 @@
+MultiTech fork of The Things Network packet forwarder
+=====================================================
+
+This fork includes fixes/configuration examples for use with MultiTech mLinux Conduit
+
+Based on fixes/updates/information found at:
+http://git.multitech.net/cgi-bin/cgit.cgi/lora_gateway.git
+https://github.com/mirakonta/packet_forwarder/tree/master/basic_pkt_fwd
+https://github.com/reissjason/packet_forwarder
+
+
 The Things Network packet forwarder
 ====================================
 
