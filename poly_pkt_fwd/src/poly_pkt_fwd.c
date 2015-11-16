@@ -66,7 +66,6 @@ Maintainer: Ruud Vlaming
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
 #define STRINGIFY(x)	#x
 #define STR(x)			STRINGIFY(x)
-#define MSG(args...)	printf(args) /* message that is destined to the user */
 #define TRACE() 		fprintf(stderr, "@ %s %d\n", __FUNCTION__, __LINE__);
 
 /* -------------------------------------------------------------------------- */

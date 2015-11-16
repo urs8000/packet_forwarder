@@ -50,7 +50,6 @@ char mntr_sys_list[MNTR_SYS_MAX][64];
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
 
-#define MSG(args...)    printf(args) /* message that is destined to the user */
 #define PROTOCOL_VERSION    1
 #define MNTR_DATA          17
 #define MNTR_RSPN          18

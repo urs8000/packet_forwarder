@@ -41,7 +41,6 @@
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
 
-#define MSG(args...)    printf(args) /* message that is destined to the user */
 #define PROTOCOL_VERSION    1
 #define GHOST_DATA         11
 
