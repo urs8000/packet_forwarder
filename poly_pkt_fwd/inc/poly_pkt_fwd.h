@@ -9,7 +9,8 @@
 #define _POLY_PKT_FWD_H_
 
 #ifndef MSG
-#define MSG(args...)    printf(args) /* message that is destined to the user */
+//#define MSG(args...)    printf(args) /* message that is destined to the user */
+#define MSG(args...)    { printf(args); fflush(stdout); } /* message that is destined to the user */
 #endif
 
 

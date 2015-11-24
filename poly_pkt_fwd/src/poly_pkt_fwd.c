@@ -49,6 +49,8 @@ Maintainer: Ruud Vlaming
 #include <netdb.h>		/* gai_strerror */
 
 #include <pthread.h>
+#include <getopt.h>
+#include <linux/limits.h>
 
 #include "parson.h"
 #include "base64.h"
@@ -1006,20 +1008,64 @@ double difftimespec(struct timespec end, struct timespec beginning) {
 	return x;
 }
 
+void usage(char *proc_name) {
+	fprintf(stderr, "Usage: %s [-c config_dir] [-l logfile]\n", proc_name);
+	exit(1);
+}
+
+static char *short_options = "c:l:h";
+static struct option long_options[] = {
+	{"config-dir", 1, 0, 'c'},
+	{"logfile", 1, 0, 'l'},
+	{"help", 0, 0, 'h'},
+	{0, 0, 0, 0},
+};
+
 /* -------------------------------------------------------------------------- */
 /* --- MAIN FUNCTION -------------------------------------------------------- */
 
-int main(void)
+int main(int argc, char *argv[])
 {
 	struct sigaction sigact; /* SIGQUIT&SIGINT&SIGTERM signal handling */
 	int i; /* loop variable and temporary variable for return value */
 	int ic; /* Server loop variable */
 	
 	/* configuration file related */
-	char *global_cfg_path= "global_conf.json"; /* contain global (typ. network-wide) configuration */
-	char *local_cfg_path = "local_conf.json"; /* contain node specific configuration, overwrite global parameters for parameters that are defined in both */
-	char *debug_cfg_path = "debug_conf.json"; /* if present, all other configuration files are ignored */
-	
+	char *global_cfg_name= "global_conf.json"; /* contain global (typ. network-wide) configuration */
+	char *local_cfg_name = "local_conf.json"; /* contain node specific configuration, overwrite global parameters for parameters that are defined in both */
+	char *debug_cfg_name = "debug_conf.json"; /* if present, all other configuration files are ignored */
+
+	int opt_ind = 0;
+
+	char cfg_dir[PATH_MAX] = {0};
+	char global_cfg_path[PATH_MAX] = {0};
+	char local_cfg_path[PATH_MAX] = {0};
+	char debug_cfg_path[PATH_MAX] = {0};
+	char *logfile_path = NULL;
+	char *proc_name = argv[0];
+
+	while((i = getopt_long(argc, argv, short_options, long_options, &opt_ind)) >= 0) {
+		switch(i) {
+			case 0:
+				break;
+			case 'c':
+				strncpy(cfg_dir, optarg, sizeof(cfg_dir)-2);
+				strcat(cfg_dir, "/");
+				break;
+			case 'l':
+				logfile_path = optarg;
+				break;
+			case 'h':
+			default:
+				usage(proc_name);
+				break;
+		}
+	}
+
+	snprintf(global_cfg_path, sizeof(global_cfg_path),  "%s%s", cfg_dir, global_cfg_name);
+	snprintf(local_cfg_path, sizeof(local_cfg_path),  "%s%s", cfg_dir, local_cfg_name);
+	snprintf(debug_cfg_path, sizeof(debug_cfg_path),  "%s%s", cfg_dir, debug_cfg_name);
+
 	/* threads */
 	pthread_t thrid_up;
 	pthread_t thrid_down[MAX_SERVERS];
@@ -1064,6 +1110,21 @@ int main(void)
 	float rx_nocrc_ratio;
 	float up_ack_ratio;
 	float dw_ack_ratio;
+
+	/* redirect stdout, stderr to logfile if specified */
+	int logfile_fd;
+	FILE *logfile = NULL;
+	if (logfile_path) {
+		logfile = fopen(logfile_path, "w");
+		if (logfile) {
+			logfile_fd = fileno(logfile);
+			dup2(logfile_fd, STDOUT_FILENO);
+			dup2(logfile_fd, STDERR_FILENO);
+		} else {
+			printf("Error opening log file %s\n", logfile_path);
+			exit(1);
+		}
+	}
 	
 	/* display version informations */
 	MSG("*** Poly Packet Forwarder for Lora Gateway ***\nVersion: " VERSION_STRING "\n");
