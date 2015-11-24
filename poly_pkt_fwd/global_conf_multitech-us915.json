@@ -207,10 +207,10 @@
             "serv_port_up": 1680,
             "serv_port_down": 1681,
             "serv_enabled": false },
-          { /* "server_address": "iot.semtech.com", */
-	    "server_address": "80.83.53.26",
-            "serv_port_up": 1680,
-            "serv_port_down": 1680,
+          { /* "server_address": "us01-iot.semtech.com", */
+	    "server_address": "12.13.93.141",
+            "serv_port_up": 1780,
+            "serv_port_down": 1780,
             "serv_enabled": true },
 	  { /* "server_address": "croft.thethings.girovito.nl", */
             "server_address": "54.229.214.112",
