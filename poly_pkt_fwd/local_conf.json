@@ -2,11 +2,16 @@
 /* Put there parameters that are different for each gateway (eg. pointing one gateway to a test server while the others stay in production) */
 /* Settings defined in global_conf will be overwritten by those in local_conf */
     "gateway_conf": {
-        "gateway_ID": "AA555A000004BABA" /* you must pick a unique 64b number for each gateway (represented by an hex string) */
-        
-        
-        
-        
-        
+	/* you must pick a unique 64b number for each gateway (represented by an hex string) */
+        "gateway_ID": "AA555A000004BABA",
+        /* Email of gateway operator, max 40 chars*/
+        "contact_email": "operator@gateway.tst", 
+        /* Public description of this device, max 64 chars */
+        "description": "Update me" 
+	/* Enter VALID GPS coordinates below before enabling fake GPS */
+        "fake_gps": false,
+        "ref_latitude": 10,
+        "ref_longitude": 20,
+        "ref_altitude": -1
     }
 }

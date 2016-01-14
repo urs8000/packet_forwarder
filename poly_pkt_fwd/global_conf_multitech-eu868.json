@@ -236,7 +236,7 @@
         "forward_crc_disabled": true,
         /* GPS configuration */
         "gps_tty_path": "/dev/ttyAMA0",
-        "fake_gps": true,
+        "fake_gps": false,
         "ref_latitude": 10,
         "ref_longitude": 20,
         "ref_altitude": -1,

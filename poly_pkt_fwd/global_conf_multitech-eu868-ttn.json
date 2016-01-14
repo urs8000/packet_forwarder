@@ -223,7 +223,7 @@
             "serv_port_down": 1680,
             "serv_enabled": true },
           { /* "server_address": "croft.thethings.girovito.nl", */
-            "server_address": "54.229.214.112",
+            "server_address": "54.72.145.119",
             "serv_port_up" : 1700,
             "serv_port_down" : 1700,
             "serv_enabled": true } ],
@@ -237,7 +237,7 @@
         "forward_crc_disabled": true,
         /* GPS configuration */
         "gps_tty_path": "/dev/ttyAMA0",
-        "fake_gps": true,
+        "fake_gps": false,
         "ref_latitude": 10,
         "ref_longitude": 20,
         "ref_altitude": -1,
