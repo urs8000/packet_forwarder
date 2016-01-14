@@ -7,7 +7,7 @@
         /* Email of gateway operator, max 40 chars*/
         "contact_email": "operator@gateway.tst", 
         /* Public description of this device, max 64 chars */
-        "description": "Update me" 
+        "description": "Update me",
 	/* Enter VALID GPS coordinates below before enabling fake GPS */
         "fake_gps": false,
         "ref_latitude": 10,
