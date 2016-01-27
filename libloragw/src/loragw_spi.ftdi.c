@@ -72,7 +72,7 @@ int lgw_spi_open(void **spi_target_ptr) {
 		return LGW_SPI_ERROR;
 	}
 	
-#ifdef _MULTITECH_H_
+#ifdef MULTITECH_LEVELS
 	/* toggle pin ADBUS5 of the FT232H */
 	/* On the MTAC LORA, it resets the SX1301 */
 	a = PinLow(mpsse, GPIOL1);

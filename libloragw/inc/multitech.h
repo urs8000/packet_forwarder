@@ -7,6 +7,7 @@
 
 #ifndef _MULTITECH_H_
 #define _MULTITECH_H_
+#define	MULTITECH_LEVELS
 
 /* Human readable platform definition */
 #define DISPLAY_PLATFORM "MultiTech"
