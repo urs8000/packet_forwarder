@@ -54,6 +54,11 @@ else
   endif
 endif
 
+ifeq ($(PLATFORM),linklabs_blowfish_rpi)
+  LIBS += -lwiringPi
+  VFLAG += -D LINKLABS_BLOWFISH_RPI
+endif
+
 ### General build targets
 
 all: $(APP_NAME)
