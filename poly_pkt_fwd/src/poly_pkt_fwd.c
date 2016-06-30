@@ -16,6 +16,8 @@ Description:
 
 License: Revised BSD License, see LICENSE.TXT file include in the project
 Maintainer: Ruud Vlaming
+
+- 2016-30-06 : Charles-Henri Hallard, added LED management on LinkLabs RPI GW
 */
 
 
@@ -117,6 +119,15 @@ Maintainer: Ruud Vlaming
 
 #define STATUS_SIZE		328
 #define TX_BUFF_SIZE	((540 * NB_PKT_MAX) + 30 + STATUS_SIZE)
+
+// For LinkLabs Raspberry Pi Gateway
+#ifdef LINKLABS_BLOWFISH_RPI
+#include <wiringPi.h>
+#define GPS_PPS  							7 	/* GPIO4  wPI:7 */
+#define LL_LED_1 							2 	/* GPIO27 wPI:2 */
+#define LL_LED_2 							6 	/* GPIO25 wPI:6 */
+#define LL_LED_BLINK_DURATION 250 /* Blink 250Ms  */
+#endif
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES (GLOBAL) ------------------------------------------- */
@@ -1361,6 +1372,15 @@ int main(int argc, char *argv[])
     	MSG("WARNING: [main] All streams have been disabled, gateway may be completely silent.\n");
     }
 
+#ifdef LINKLABS_BLOWFISH_RPI
+  wiringPiSetup() ;
+  pinMode(GPS_PPS, INPUT) ;
+  pinMode(LL_LED_1, OUTPUT) ;
+  pinMode(LL_LED_2, OUTPUT) ;
+  digitalWrite(LL_LED_1, HIGH);
+  digitalWrite(LL_LED_2, HIGH);
+#endif
+
 	/* main loop task : statistics collection */
 	while (!exit_sig && !quit_sig) {
 		/* wait for next reporting interval */
@@ -1521,7 +1541,13 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-	
+
+#ifdef LINKLABS_BLOWFISH_RPI
+	// Be sure to ligh of the LED
+  digitalWrite(LL_LED_1, LOW) ; 
+  digitalWrite(LL_LED_2, LOW) ; 
+#endif
+
 	MSG("INFO: Exiting packet forwarder program\n");
 	exit(EXIT_SUCCESS);
 }
@@ -1586,7 +1612,24 @@ void thread_up(void) {
 	*(uint32_t *)(buff_up + 8) = net_mac_l;
 	
 	while (!exit_sig && !quit_sig) {
-	
+
+#ifdef LINKLABS_BLOWFISH_RPI
+
+		static unsigned long led2_timer = 0;
+
+		// Manage blinking led timer expiration 
+		if (led2_timer && (millis()-led2_timer>LL_LED_BLINK_DURATION)) {
+	  	digitalWrite(LL_LED_2, HIGH) ; 
+			led2_timer = 0;
+		}
+
+		// Report on LED GPS PPS Signal (blink when satellites OK)
+		// Signal is reversed, like this when running (even with no GPS)
+		// the led will be on, and if PPS signal from GPS is okay the led
+		// will blink off for a short time
+  	digitalWrite(LL_LED_1, !digitalRead(GPS_PPS)) ; 
+#endif
+
 		/* fetch packets */
 		pthread_mutex_lock(&mx_concent);
 		if (radiostream_enabled == true) nb_pkt = lgw_receive(NB_PKT_MAX, rxpkt); else nb_pkt = 0;
@@ -1603,6 +1646,15 @@ void thread_up(void) {
 		/* check if there are status report to send */
 		send_report = report_ready; /* copy the variable so it doesn't change mid-function */
 		/* no mutex, we're only reading */
+
+#ifdef LINKLABS_BLOWFISH_RPI
+		if ( nb_pkt > 0) {
+			// Blink LED2
+	  	digitalWrite(LL_LED_2, LOW) ; 
+			led2_timer = millis();
+		}
+#endif
+
 		
 		/* wait a short time if no packets, nor status report */
 		if ((nb_pkt == 0) && (send_report == false)) {
