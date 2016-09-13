@@ -54,10 +54,10 @@ else
   endif
 endif
 
-ifeq ($(PLATFORM),linklabs_blowfish_rpi)
-  LIBS += -lwiringPi
-  VFLAG += -D LINKLABS_BLOWFISH_RPI
-endif
+# To drive onboards LED and other stuff you need
+# to install and link with bcm2835 library, see
+# http://www.airspayce.com/mikem/bcm2835/
+LIBS += -lbcm2835
 
 ### General build targets
 
