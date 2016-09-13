@@ -17,7 +17,8 @@ Description:
 License: Revised BSD License, see LICENSE.TXT file include in the project
 Maintainer: Ruud Vlaming
 
-- 2016-30-06 : Charles-Henri Hallard, added LED management on LinkLabs RPI GW
+
+
 */
 
 
@@ -51,6 +52,8 @@ Maintainer: Ruud Vlaming
 #include <netdb.h>		/* gai_strerror */
 
 #include <pthread.h>
+
+#include <bcm2835.h>
 #include <getopt.h>
 #include <linux/limits.h>
 
@@ -70,6 +73,9 @@ Maintainer: Ruud Vlaming
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
 #define STRINGIFY(x)	#x
 #define STR(x)			STRINGIFY(x)
+#ifndef MSG
+#define MSG(args...)	printf(args) /* message that is destined to the user */
+#endif
 #define TRACE() 		fprintf(stderr, "@ %s %d\n", __FUNCTION__, __LINE__);
 
 /* -------------------------------------------------------------------------- */
@@ -92,7 +98,7 @@ Maintainer: Ruud Vlaming
 
 
 #define DEFAULT_KEEPALIVE	5	/* default time interval for downstream keep-alive packet */
-#define DEFAULT_STAT		30	/* default time interval for statistics */
+#define DEFAULT_STAT		  30/* default time interval for statistics */
 #define PUSH_TIMEOUT_MS		100
 #define PULL_TIMEOUT_MS		200
 #define GPS_REF_MAX_AGE		30	/* maximum admitted delay in seconds of GPS loss before considering latest GPS sync unusable */
@@ -120,17 +126,20 @@ Maintainer: Ruud Vlaming
 #define STATUS_SIZE		328
 #define TX_BUFF_SIZE	((540 * NB_PKT_MAX) + 30 + STATUS_SIZE)
 
-// For LinkLabs Raspberry Pi Gateway
-#ifdef LINKLABS_BLOWFISH_RPI
-#include <wiringPi.h>
-#define GPS_PPS  							7 	/* GPIO4  wPI:7 */
-#define LL_LED_1 							2 	/* GPIO27 wPI:2 */
-#define LL_LED_2 							6 	/* GPIO25 wPI:6 */
-#define LL_LED_BLINK_DURATION 250 /* Blink 250Ms  */
+#ifndef NOT_A_PIN
+#define NOT_A_PIN 0xFF
 #endif
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE VARIABLES (GLOBAL) ------------------------------------------- */
+
+static char *short_options = "c:l:h";
+static struct option long_options[] = {
+	{"config-dir", 1, 0, 'c'},
+	{"logfile", 1, 0, 'l'},
+	{"help", 0, 0, 'h'},
+	{0, 0, 0, 0},
+};
 
 /* signal handling variables */
 volatile bool exit_sig = false; /* 1 -> application terminates cleanly (shut down hardware, close open files, etc) */
@@ -152,6 +161,14 @@ static int keepalive_time = DEFAULT_KEEPALIVE; /* send a PULL_DATA request every
 
 /* statistics collection configuration variables */
 static unsigned stat_interval = DEFAULT_STAT; /* time interval (in sec) at which statistics are collected and displayed */
+
+/* LED */
+static unsigned led_heartbeat = NOT_A_PIN;/* heartbeat LED */
+static unsigned led_down = NOT_A_PIN; 		/* downlink for server */
+static unsigned led_error = NOT_A_PIN; 		/* error LED */
+static unsigned led_packet = NOT_A_PIN; 	/* packet led */
+static unsigned led_pps = NOT_A_PIN; 			/* PPS GPS Led (linklabs board) */
+static unsigned pin_pps = NOT_A_PIN; 			/* PPS GPS pin (LinkLabs board) */
 
 /* gateway <-> MAC protocol variables */
 static uint32_t net_mac_h; /* Most Significant Nibble, network order */
@@ -738,7 +755,49 @@ static int parse_gateway_configuration(const char * conf_file) {
 		stat_interval = (unsigned)json_value_get_number(val);
 		MSG("INFO: statistics display interval is configured to %i seconds\n", stat_interval);
 	}
+
+	/* get hearttbeat GPIO LED (optional) */
+	val = json_object_get_value(conf_obj, "led_heartbeat");
+	if (val != NULL) {
+		led_heartbeat = (unsigned)json_value_get_number(val);
+		MSG("INFO: LED heartbeat is configured to GPIO%i\n", led_heartbeat);
+	}
+
+	/* get downlink GPIO LED (optional) */
+	val = json_object_get_value(conf_obj, "led_down");
+	if (val != NULL) {
+		led_down = (unsigned)json_value_get_number(val);
+		MSG("INFO: LED downlink is configured to GPIO%i\n", led_down);
+	}
+
+	/* get error GPIO LED (optional) */
+	val = json_object_get_value(conf_obj, "led_error");
+	if (val != NULL) {
+		led_error = (unsigned)json_value_get_number(val);
+		MSG("INFO: LED error is configured to GPIO%i\n", led_error);
+	}
+
+	/* get packet GPIO LED (optional) */
+	val = json_object_get_value(conf_obj, "led_packet");
+	if (val != NULL) {
+		led_packet = (unsigned)json_value_get_number(val);
+		MSG("INFO: LED packet is configured to GPIO%i\n", led_packet);
+	}
+
+	/* get PPS PIN Input LED (optional) */
+	val = json_object_get_value(conf_obj, "pin_pps");
+	if (val != NULL) {
+		pin_pps = (unsigned)json_value_get_number(val);
+		MSG("INFO: GPS PPS pin is configured to GPIO%i\n", pin_pps);
+	}
 	
+	/* get PPS GPIO LED (optional) */
+	val = json_object_get_value(conf_obj, "led_pps");
+	if (val != NULL) {
+		led_pps = (unsigned)json_value_get_number(val);
+		MSG("INFO: LED pps is configured to GPIO%i\n", led_pps);
+	}
+
 	/* get time-out value (in ms) for upstream datagrams (optional) */
 	val = json_object_get_value(conf_obj, "push_timeout_ms");
 	if (val != NULL) {
@@ -1019,22 +1078,146 @@ double difftimespec(struct timespec end, struct timespec beginning) {
 	return x;
 }
 
+
+
+void log_packet( struct lgw_pkt_rx_s* p) {
+				
+				uint8_t mtype = (*p->payload) ;
+
+        /* writing devAddr */ 
+        printf( "INFO: [#");
+				for (int j=4; j>0; j--) {
+					printf("%02X", p->payload[j]);
+				}
+        printf( "] ");
+
+				// RFU & Major  
+				//printf("%X:%X ", (mtype>>2)&0x07, (mtype)&0x03 ) ;
+
+				// Message type (3 bits) 
+				switch ( (mtype>>5)&0x07 ) {
+					case 0x00: printf("jRQ"); break; /* join request */
+					case 0x01: printf("jAC"); break; /* join accept */
+					case 0x02: printf("uUP"); break; /* unconfirmed up */
+					case 0x03: printf("uDN"); break; /* unconfirmed down */
+					case 0x04: printf("cUP"); break; /* Confirmed up */
+					case 0x05: printf("cDN"); break; /* Confirmed down */
+					case 0x06: printf("RFU"); break;
+					case 0x07: printf("Prp"); break;
+				}
+				
+				
+        /* writing RX frequency */
+        printf( " CRC:");
+
+        /* writing CRC status */
+        switch(p->status) {
+                case STAT_CRC_OK:               printf("OK "); break;
+                case STAT_CRC_BAD:      printf("Bad "); break;
+                case STAT_NO_CRC:               printf("None "); break;
+                case STAT_UNDEFINED:printf("Undefined "); break;
+                default:                                                printf("???? ");
+        }
+
+        /* writing Frequency, RX modem/IF chan  and RF chan */
+        printf("Freq:%3.2fMHz ch:%d RFch:%u ", p->freq_hz/1000000.0f, p->if_chain, p->rf_chain);
+
+        /* writing modulation */
+        switch(p->modulation) {
+                case MOD_LORA:printf("LORA["); break;
+                case MOD_FSK:   printf("FSK["); break;
+                default:                        printf("???[");
+        }
+
+        if (p->modulation == MOD_LORA) {
+                switch (p->datarate) {
+                        case DR_LORA_SF7:       printf("SF7 "); break;
+                        case DR_LORA_SF8:       printf("SF8 "); break;
+                        case DR_LORA_SF9:       printf("SF9 "); break;
+                        case DR_LORA_SF10:printf("SF10 "); break;
+                        case DR_LORA_SF11:printf("SF11 "); break;
+                        case DR_LORA_SF12:printf("SF12 "); break;
+                        default:                                        printf("??? ");
+                }
+        } else if (p->modulation == MOD_FSK) {
+                printf("FSK:%6u ", p->datarate);
+        } else {
+                printf("??? ");
+        }
+
+        /* writing bandwidth */
+        switch(p->bandwidth) {
+                case BW_500KHZ:         printf("500Khz "); break;
+                case BW_250KHZ:         printf("250Khz "); break;
+                case BW_125KHZ:         printf("125Khz "); break;
+                case BW_62K5HZ:         printf("62K5hz "); break;
+                case BW_31K2HZ:         printf("31K2hz "); break;
+                case BW_15K6HZ:         printf("15K6hz "); break;
+                case BW_7K8HZ:          printf("7K8hz "); break;
+                case BW_UNDEFINED:printf("0 "); break;
+                default:          printf("-1 ");
+        }
+
+        /* writing coderate */
+        switch (p->coderate) {
+                case CR_LORA_4_5:       printf("4/5"); break;
+                case CR_LORA_4_6:       printf("2/3"); break;
+                case CR_LORA_4_7:       printf("4/7"); break;
+                case CR_LORA_4_8:       printf("1/2"); break;
+                case CR_UNDEFINED:printf("Undefined"); break;
+                default:                                        printf("???");
+        }
+
+        /* writing packet RSSI + average SNR */
+        printf("] RSSI:%+.0fdB SNR:%+.1fdB ", p->rssi, p->snr);
+
+        /* writing packet size */
+        printf("Size:%db ", p->size);
+
+        /* writing status */
+        if (p->status==STAT_CRC_OK || p->status==STAT_NO_CRC ) {
+                char buff[341]; /* 255 bytes = 340 chars in b64 + null char */
+                int j = bin_to_b64(p->payload, p->size, buff, sizeof(buff));
+                if (j>0) {
+                        printf("Data:'%s'", buff);
+                } else {
+                        printf("Error Encoding data");
+                }
+
+                        /*
+                printf(" => ");
+                // writing hex-encoded payload (bundled in 32-bit words)
+                for (int j = 0; j < p->size; ++j) {
+                        if ((j > 0) && (j%4 == 0)) printf("-");
+                        printf("%02X", p->payload[j]);
+                }
+                */
+        }
+
+        /* end of line */
+        printf("\n");
+
+        /* whole paylaod
+        if (p->status==STAT_CRC_OK || p->status==STAT_NO_CRC ) {
+          printf("HEX Payload: ");
+					// writing hex-encoded payload (bundled in 32-bit words)
+          for (int j = 0; j < p->size; ++j) {
+            printf(" %02X", p->payload[j]);
+          }
+        } 
+        printf("\n");		
+				*/				
+				
+}
+
+
 void usage(char *proc_name) {
 	fprintf(stderr, "Usage: %s [-c config_dir] [-l logfile]\n", proc_name);
 	exit(1);
 }
 
-static char *short_options = "c:l:h";
-static struct option long_options[] = {
-	{"config-dir", 1, 0, 'c'},
-	{"logfile", 1, 0, 'l'},
-	{"help", 0, 0, 'h'},
-	{0, 0, 0, 0},
-};
-
 /* -------------------------------------------------------------------------- */
 /* --- MAIN FUNCTION -------------------------------------------------------- */
-
 int main(int argc, char *argv[])
 {
 	struct sigaction sigact; /* SIGQUIT&SIGINT&SIGTERM signal handling */
@@ -1045,7 +1228,7 @@ int main(int argc, char *argv[])
 	char *global_cfg_name= "global_conf.json"; /* contain global (typ. network-wide) configuration */
 	char *local_cfg_name = "local_conf.json"; /* contain node specific configuration, overwrite global parameters for parameters that are defined in both */
 	char *debug_cfg_name = "debug_conf.json"; /* if present, all other configuration files are ignored */
-
+	
 	int opt_ind = 0;
 
 	char cfg_dir[PATH_MAX] = {0};
@@ -1136,7 +1319,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 	}
-	
+ 	
 	/* display version informations */
 	MSG("*** Poly Packet Forwarder for Lora Gateway ***\nVersion: " VERSION_STRING "\n");
 	MSG("*** Lora concentrator HAL library version info ***\n%s\n***\n", lgw_version_info());
@@ -1173,6 +1356,39 @@ int main(int argc, char *argv[])
 	} else {
 		MSG("ERROR: [main] failed to find any configuration file named %s, %s OR %s\n", global_cfg_path, local_cfg_path, debug_cfg_path);
 		exit(EXIT_FAILURE);
+	}
+	
+	if (led_down!=NOT_A_PIN  || led_heartbeat!=NOT_A_PIN || 
+			led_pps!=NOT_A_PIN   || pin_pps!=NOT_A_PIN || 
+			led_error!=NOT_A_PIN || led_packet!=NOT_A_PIN	) {
+		if (!bcm2835_init()) {
+			MSG("ERROR: [main] failed to initialize with bcm2835_init()\n");
+			exit(EXIT_FAILURE);
+		}
+
+		if (led_down!=NOT_A_PIN) {
+			bcm2835_gpio_fsel(led_down, BCM2835_GPIO_FSEL_OUTP);
+      bcm2835_gpio_write(led_down, LOW);
+		}
+		if (led_heartbeat!=NOT_A_PIN) {
+			bcm2835_gpio_fsel(led_heartbeat, BCM2835_GPIO_FSEL_OUTP);
+      bcm2835_gpio_write(led_heartbeat, LOW);
+		}
+		if (led_error!=NOT_A_PIN) {
+			bcm2835_gpio_fsel(led_error, BCM2835_GPIO_FSEL_OUTP);
+      bcm2835_gpio_write(led_error, LOW);
+		}
+		if (led_packet!=NOT_A_PIN) {
+			bcm2835_gpio_fsel(led_packet, BCM2835_GPIO_FSEL_OUTP);
+      bcm2835_gpio_write(led_packet, LOW);
+		}
+		if (led_pps!=NOT_A_PIN) {
+			bcm2835_gpio_fsel(led_pps, BCM2835_GPIO_FSEL_OUTP);
+      bcm2835_gpio_write(led_pps, LOW);
+		}
+		if (pin_pps!=NOT_A_PIN) {
+			bcm2835_gpio_fsel(pin_pps, BCM2835_GPIO_FSEL_INPT);
+		}
 	}
 	
 	/* Start GPS a.s.a.p., to allow it to lock */
@@ -1372,15 +1588,6 @@ int main(int argc, char *argv[])
     	MSG("WARNING: [main] All streams have been disabled, gateway may be completely silent.\n");
     }
 
-#ifdef LINKLABS_BLOWFISH_RPI
-  wiringPiSetup() ;
-  pinMode(GPS_PPS, INPUT) ;
-  pinMode(LL_LED_1, OUTPUT) ;
-  pinMode(LL_LED_2, OUTPUT) ;
-  digitalWrite(LL_LED_1, HIGH);
-  digitalWrite(LL_LED_2, HIGH);
-#endif
-
 	/* main loop task : statistics collection */
 	while (!exit_sig && !quit_sig) {
 		/* wait for next reporting interval */
@@ -1510,6 +1717,12 @@ int main(int argc, char *argv[])
 			report_ready = true;
 			pthread_mutex_unlock(&mx_stat_rep);
 		}
+
+		uint32_t trig_cnt_us;
+		if (lgw_get_trigcnt(&trig_cnt_us) == LGW_HAL_SUCCESS && trig_cnt_us == 0x7E000000) {
+			MSG("ERROR: [main] unintended SX1301 reset detected, terminating packet forwarder.\n");
+			exit(EXIT_FAILURE);
+		}
 	}
 	
 	/* wait for upstream thread to finish (1 fetch cycle max) */
@@ -1539,15 +1752,17 @@ int main(int argc, char *argv[])
 			} else {
 				MSG("WARNING: failed to stop concentrator successfully\n");
 			}
-		}
+		} 
+
+		// Light off the LED
+		if (led_down!=NOT_A_PIN) 	   { bcm2835_gpio_write(led_down     , LOW);}
+		if (led_heartbeat!=NOT_A_PIN){ bcm2835_gpio_write(led_heartbeat, LOW);}
+		if (led_error!=NOT_A_PIN)    { bcm2835_gpio_write(led_error    , LOW);}
+		if (led_packet!=NOT_A_PIN)   { bcm2835_gpio_write(led_packet   , LOW);}
+		if (led_pps!=NOT_A_PIN)      { bcm2835_gpio_write(led_pps      , LOW);}
+	
 	}
-
-#ifdef LINKLABS_BLOWFISH_RPI
-	// Be sure to ligh of the LED
-  digitalWrite(LL_LED_1, LOW) ; 
-  digitalWrite(LL_LED_2, LOW) ; 
-#endif
-
+	
 	MSG("INFO: Exiting packet forwarder program\n");
 	exit(EXIT_SUCCESS);
 }
@@ -1583,6 +1798,10 @@ void thread_up(void) {
 	uint8_t token_h; /* random token for acknowledgement matching */
 	uint8_t token_l; /* random token for acknowledgement matching */
 	
+	int led_heartbeat_cnt=0;
+	int led_error_cnt=0;
+	int led_packet_cnt=0;
+	
 	/* ping measurement variables */
 	struct timespec send_time;
 	struct timespec recv_time;
@@ -1612,31 +1831,22 @@ void thread_up(void) {
 	*(uint32_t *)(buff_up + 8) = net_mac_l;
 	
 	while (!exit_sig && !quit_sig) {
-
-#ifdef LINKLABS_BLOWFISH_RPI
-
-		static unsigned long led2_timer = 0;
-
-		// Manage blinking led timer expiration 
-		if (led2_timer && (millis()-led2_timer>LL_LED_BLINK_DURATION)) {
-	  	digitalWrite(LL_LED_2, HIGH) ; 
-			led2_timer = 0;
-		}
-
-		// Report on LED GPS PPS Signal (blink when satellites OK)
-		// Signal is reversed, like this when running (even with no GPS)
-		// the led will be on, and if PPS signal from GPS is okay the led
-		// will blink off for a short time
-  	digitalWrite(LL_LED_1, !digitalRead(GPS_PPS)) ; 
-#endif
-
+	
 		/* fetch packets */
 		pthread_mutex_lock(&mx_concent);
 		if (radiostream_enabled == true) nb_pkt = lgw_receive(NB_PKT_MAX, rxpkt); else nb_pkt = 0;
 		if (ghoststream_enabled == true) nb_pkt = ghost_get(NB_PKT_MAX-nb_pkt, &rxpkt[nb_pkt]) + nb_pkt;
 
 
-        //TODO this test should in fact be before the ghost packets are collected.
+		// Report on LED GPS PPS Signal (blink when satellites OK)
+		// Signal is reversed, like this when running (even with no GPS)
+		// the led will be on, and if PPS signal from GPS is okay the led
+		// will blink off for a short time
+		if (led_pps!=NOT_A_PIN && pin_pps!=NOT_A_PIN) {
+			bcm2835_gpio_write(led_pps,  bcm2835_gpio_lev(pin_pps));
+		}
+
+    //TODO this test should in fact be before the ghost packets are collected.
 		pthread_mutex_unlock(&mx_concent);
 		if (nb_pkt == LGW_HAL_ERROR) {
 			MSG("ERROR: [up] failed packet fetch, exiting\n");
@@ -1646,19 +1856,34 @@ void thread_up(void) {
 		/* check if there are status report to send */
 		send_report = report_ready; /* copy the variable so it doesn't change mid-function */
 		/* no mutex, we're only reading */
-
-#ifdef LINKLABS_BLOWFISH_RPI
-		if ( nb_pkt > 0) {
-			// Blink LED2
-	  	digitalWrite(LL_LED_2, LOW) ; 
-			led2_timer = millis();
-		}
-#endif
-
 		
 		/* wait a short time if no packets, nor status report */
 		if ((nb_pkt == 0) && (send_report == false)) {
 			wait_ms(FETCH_SLEEP_MS);
+			if (led_heartbeat != NOT_A_PIN) {
+				led_heartbeat_cnt++;
+				if (led_heartbeat_cnt == 40) {
+					bcm2835_gpio_write(led_heartbeat, HIGH);
+				}
+				else if (led_heartbeat_cnt >= 80) {
+					bcm2835_gpio_write(led_heartbeat, LOW);
+				led_heartbeat_cnt=0;
+				}
+			}
+			
+			// Led time out expired
+			if (led_error != NOT_A_PIN) {
+				if (--led_error_cnt==0) {
+					bcm2835_gpio_write(led_error, LOW);
+				}
+			}
+			if (led_packet != NOT_A_PIN) {
+				if (--led_packet_cnt==0) {
+					bcm2835_gpio_write(led_packet, LOW);
+				}
+			}
+			
+			
 			continue;
 		}
 		
@@ -1694,11 +1919,17 @@ void thread_up(void) {
 		for (i=0; i < nb_pkt; ++i) {
 			p = &rxpkt[i];
 			
+			// Display information
+			log_packet(p);
+			
 			/* basic packet filtering */
 			pthread_mutex_lock(&mx_meas_up);
 			meas_nb_rx_rcv += 1;
 			switch(p->status) {
 				case STAT_CRC_OK:
+				  // Green led
+					led_packet_cnt=FETCH_SLEEP_MS*10;
+					bcm2835_gpio_write(led_packet, HIGH);
 					meas_nb_rx_ok += 1;
 					if (!fwd_valid_pkt) {
 						pthread_mutex_unlock(&mx_meas_up);
@@ -1706,6 +1937,9 @@ void thread_up(void) {
 					}
 					break;
 				case STAT_CRC_BAD:
+				  // Red led
+					led_error_cnt=FETCH_SLEEP_MS*10;
+					bcm2835_gpio_write(led_error, HIGH);
 					meas_nb_rx_bad += 1;
 					if (!fwd_error_pkt) {
 						pthread_mutex_unlock(&mx_meas_up);
@@ -1713,6 +1947,11 @@ void thread_up(void) {
 					}
 					break;
 				case STAT_NO_CRC:
+				  // Green and Red led
+					led_packet_cnt=FETCH_SLEEP_MS*10;
+					led_error_cnt=FETCH_SLEEP_MS*10; 
+					bcm2835_gpio_write(led_packet, HIGH);
+					bcm2835_gpio_write(led_error, HIGH);
 					meas_nb_rx_nocrc += 1;
 					if (!fwd_nocrc_pkt) {
 						pthread_mutex_unlock(&mx_meas_up);
@@ -1720,6 +1959,9 @@ void thread_up(void) {
 					}
 					break;
 				default:
+				  // Red led
+					led_error_cnt=FETCH_SLEEP_MS*10; 
+					bcm2835_gpio_write(led_error, HIGH);
 					MSG("WARNING: [up] received packet with unknown status %u (size %u, modulation %u, BW %u, DR %u, RSSI %.1f)\n", p->status, p->size, p->modulation, p->bandwidth, p->datarate, p->rssi);
 					pthread_mutex_unlock(&mx_meas_up);
 					continue; /* skip that packet */
@@ -2149,6 +2391,10 @@ void thread_down(void* pic) {
 			break;
 		}
 		
+		if (led_down!=NOT_A_PIN) {
+			bcm2835_gpio_write(led_down, HIGH);
+		}
+		
 		/* generate random token for request */
 		token_h = (uint8_t)rand(); /* random token */
 		token_l = (uint8_t)rand(); /* random token */
@@ -2268,9 +2514,12 @@ void thread_down(void* pic) {
 				} else { /* out-of-sync token */
 					MSG("INFO: [down] for server %s, received out-of-sync ACK\n",serv_addr[ic]);
 				}
+				if (led_down!=NOT_A_PIN) {
+					bcm2835_gpio_write(led_down, LOW);
+				}
+
 				continue;
 			}
-			
 
 			//TODO: This might generate to much logging data. The reporting should be reevaluated and an option -q should be added.
 			/* the datagram is a PULL_RESP */
