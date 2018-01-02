@@ -34,8 +34,10 @@ Specific Raspberry PI boards version features
 =============================================
 
 To be able to drive Raspbery PI concentrator on boards LED, this program
-use bcm2835 library, you need to install them before anything.
-see http://www.airspayce.com/mikem/bcm2835/
+use ~~bcm2835 library, you need to install them before anything.
+see http://www.airspayce.com/mikem/bcm2835/~~ gpiolib which control GPIO using 
+linux filesystem, making this packet forwarder more compatible with different
+target.
 
 This version has been written to works with Linklabs board and also with
 ic880a concentrator + Raspberry Pi Plate.
@@ -51,6 +53,7 @@ a name and the GPIO pin number. Names are :
 - `led_packet` LED will blink on each packet received
 - `led_pps` LED used for GPS PPS indicator (mainly linklabs board)
 - `pin_pps` Pin where PPS signal is connected to (if any, mainly linklabs board)
+- `pin_reset` GPIO pin connected to SX1301 concentrator reset
 
 GPS PPS pin on linklabs boards are not connected to LED but on a GPIO, so `led_pps` 
 and `pin_pps` are used for a "software link", incoming PPS signal going to GPIO input
@@ -63,14 +66,22 @@ is redirected to GPIO led output, thus for example, with linklabs, configuration
   "led_packet": 27, /* GPIO27 RED   */
 ```
 
-And fot ic880a RPI plate (4 leds), configuration can be 
+for ic880a RPI plate (4 leds), configuration can be 
 ```json
   "led_heartbeat": 4, /* GPIO4 Blue   */
   "led_down": 18,     /* GPIO18 White */
   "led_error": 23,    /* GPIO23 Red   */
   "led_packet": 24,   /* GPIO24 Green */
+  "reset_pin": 17,    /* GPIO17 concentrator reset */
+
 ```
 
+And for RAK831 RPI Zero plate configuration can be (no led pins)
+```json
+  "reset_pin": 25,    /* GPIO25 concentrator reset */
+```
+
+  
 An extented Log ouput on each packet received has also been added to this version, this
 can be usefull for monitoring packet recevided by concentrator, regardless if they are or
 not send the gateway. It's logged as info with the following informations
