@@ -53,7 +53,7 @@ Maintainer: Ruud Vlaming
 
 #include <pthread.h>
 
-#include <bcm2835.h>
+#include <gpiolib.h>
 #include <getopt.h>
 #include <linux/limits.h>
 
@@ -163,12 +163,13 @@ static int keepalive_time = DEFAULT_KEEPALIVE; /* send a PULL_DATA request every
 static unsigned stat_interval = DEFAULT_STAT; /* time interval (in sec) at which statistics are collected and displayed */
 
 /* LED */
-static unsigned led_heartbeat = NOT_A_PIN;/* heartbeat LED */
-static unsigned led_down = NOT_A_PIN; 		/* downlink for server */
-static unsigned led_error = NOT_A_PIN; 		/* error LED */
-static unsigned led_packet = NOT_A_PIN; 	/* packet led */
-static unsigned led_pps = NOT_A_PIN; 			/* PPS GPS Led (linklabs board) */
-static unsigned pin_pps = NOT_A_PIN; 			/* PPS GPS pin (LinkLabs board) */
+static int led_heartbeat = NOT_A_PIN;/* heartbeat LED */
+static int led_down = NOT_A_PIN; 		/* downlink for server */
+static int led_error = NOT_A_PIN; 		/* error LED */
+static int led_packet = NOT_A_PIN; 	/* packet led */
+static int led_pps = NOT_A_PIN; 			/* PPS GPS Led (linklabs board) */
+static int pin_pps = NOT_A_PIN; 			/* PPS GPS pin (LinkLabs board) */
+static int pin_reset = NOT_A_PIN; 			/* Concentrator Reset pin */
 
 /* gateway <-> MAC protocol variables */
 static uint32_t net_mac_h; /* Most Significant Nibble, network order */
@@ -798,6 +799,13 @@ static int parse_gateway_configuration(const char * conf_file) {
 		MSG("INFO: LED pps is configured to GPIO%i\n", led_pps);
 	}
 
+	/* get Reset PIN  */
+	val = json_object_get_value(conf_obj, "pin_reset");
+	if (val != NULL) {
+		pin_reset =  (unsigned)json_value_get_number(val);
+		MSG("INFO: SX1301 RESET is configured to GPIO%i\n", pin_reset);
+	}
+
 	/* get time-out value (in ms) for upstream datagrams (optional) */
 	val = json_object_get_value(conf_obj, "push_timeout_ms");
 	if (val != NULL) {
@@ -1211,6 +1219,22 @@ void log_packet( struct lgw_pkt_rx_s* p) {
 }
 
 
+// Value : 1=Low Output (2=High Output)
+void gpio_config(int * gpio, int value) {
+	if ( *gpio != NOT_A_PIN ) {
+		// Went fine
+		if ( gpio_export(*gpio) > -1 ) {
+			// Set value and direction
+			gpio_direction(*gpio,value);
+		} else {
+			MSG("INFO: can't export GPIO%d pin\n", *gpio);
+			// Can't export set to not a pin
+			*gpio = NOT_A_PIN;
+		}
+	}
+}
+
+
 void usage(char *proc_name) {
 	fprintf(stderr, "Usage: %s [-c config_dir] [-l logfile]\n", proc_name);
 	exit(1);
@@ -1358,37 +1382,23 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	
-	if (led_down!=NOT_A_PIN  || led_heartbeat!=NOT_A_PIN || 
-			led_pps!=NOT_A_PIN   || pin_pps!=NOT_A_PIN || 
-			led_error!=NOT_A_PIN || led_packet!=NOT_A_PIN	) {
-		if (!bcm2835_init()) {
-			MSG("ERROR: [main] failed to initialize with bcm2835_init()\n");
-			exit(EXIT_FAILURE);
-		}
+	gpio_config(&led_down, 1); 		// 1=Low Output (2=High Output)
+	gpio_config(&led_heartbeat, 1); // 1=Low Output (2=High Output)
+	gpio_config(&led_error, 1); 	// 1=Low Output (2=High Output)
+	gpio_config(&led_packet, 1); 	// 1=Low Output (2=High Output)
+	gpio_config(&led_pps, 1); 		// 1=Low Output (2=High Output)
+	gpio_config(&pin_pps, 0); 		// 0=Input
+	gpio_config(&pin_reset, 0);     // 1=Low Output (2=High Output)
 
-		if (led_down!=NOT_A_PIN) {
-			bcm2835_gpio_fsel(led_down, BCM2835_GPIO_FSEL_OUTP);
-      bcm2835_gpio_write(led_down, LOW);
-		}
-		if (led_heartbeat!=NOT_A_PIN) {
-			bcm2835_gpio_fsel(led_heartbeat, BCM2835_GPIO_FSEL_OUTP);
-      bcm2835_gpio_write(led_heartbeat, LOW);
-		}
-		if (led_error!=NOT_A_PIN) {
-			bcm2835_gpio_fsel(led_error, BCM2835_GPIO_FSEL_OUTP);
-      bcm2835_gpio_write(led_error, LOW);
-		}
-		if (led_packet!=NOT_A_PIN) {
-			bcm2835_gpio_fsel(led_packet, BCM2835_GPIO_FSEL_OUTP);
-      bcm2835_gpio_write(led_packet, LOW);
-		}
-		if (led_pps!=NOT_A_PIN) {
-			bcm2835_gpio_fsel(led_pps, BCM2835_GPIO_FSEL_OUTP);
-      bcm2835_gpio_write(led_pps, LOW);
-		}
-		if (pin_pps!=NOT_A_PIN) {
-			bcm2835_gpio_fsel(pin_pps, BCM2835_GPIO_FSEL_INPT);
-		}
+	// reset the concentrator
+	if (pin_reset != NOT_A_PIN) {
+		MSG("INFO: Reseting concentrator with GPIO%d\n", pin_reset);
+		// Assert reset
+		gpio_write(pin_reset,1);
+		// Wait 100ms
+		usleep(100000);
+		// Free reset 
+		gpio_write(pin_reset,0);
 	}
 	
 	/* Start GPS a.s.a.p., to allow it to lock */
@@ -1755,11 +1765,13 @@ int main(int argc, char *argv[])
 		} 
 
 		// Light off the LED
-		if (led_down!=NOT_A_PIN) 	   { bcm2835_gpio_write(led_down     , LOW);}
-		if (led_heartbeat!=NOT_A_PIN){ bcm2835_gpio_write(led_heartbeat, LOW);}
-		if (led_error!=NOT_A_PIN)    { bcm2835_gpio_write(led_error    , LOW);}
-		if (led_packet!=NOT_A_PIN)   { bcm2835_gpio_write(led_packet   , LOW);}
-		if (led_pps!=NOT_A_PIN)      { bcm2835_gpio_write(led_pps      , LOW);}
+		if (led_down!=NOT_A_PIN) 	 { gpio_write(led_down     , 0); gpio_unexport(led_down);      }
+		if (led_heartbeat!=NOT_A_PIN){ gpio_write(led_heartbeat, 0); gpio_unexport(led_heartbeat); }
+		if (led_error!=NOT_A_PIN)    { gpio_write(led_error    , 0); gpio_unexport(led_error    ); }
+		if (led_packet!=NOT_A_PIN)   { gpio_write(led_packet   , 0); gpio_unexport(led_packet   ); }
+		if (led_pps!=NOT_A_PIN)      { gpio_write(led_pps      , 0); gpio_unexport(led_pps      ); }
+		if (pin_pps!=NOT_A_PIN)      { gpio_unexport(pin_pps); }
+		if (pin_reset!=NOT_A_PIN)    { gpio_unexport(pin_reset); }
 	
 	}
 	
@@ -1843,7 +1855,7 @@ void thread_up(void) {
 		// the led will be on, and if PPS signal from GPS is okay the led
 		// will blink off for a short time
 		if (led_pps!=NOT_A_PIN && pin_pps!=NOT_A_PIN) {
-			bcm2835_gpio_write(led_pps,  bcm2835_gpio_lev(pin_pps));
+			gpio_write( led_pps, gpio_read(pin_pps) );
 		}
 
     //TODO this test should in fact be before the ghost packets are collected.
@@ -1863,10 +1875,10 @@ void thread_up(void) {
 			if (led_heartbeat != NOT_A_PIN) {
 				led_heartbeat_cnt++;
 				if (led_heartbeat_cnt == 40) {
-					bcm2835_gpio_write(led_heartbeat, HIGH);
+					gpio_write(led_heartbeat, 1);
 				}
 				else if (led_heartbeat_cnt >= 80) {
-					bcm2835_gpio_write(led_heartbeat, LOW);
+					gpio_write(led_heartbeat, 0);
 				led_heartbeat_cnt=0;
 				}
 			}
@@ -1874,12 +1886,12 @@ void thread_up(void) {
 			// Led time out expired
 			if (led_error != NOT_A_PIN) {
 				if (--led_error_cnt==0) {
-					bcm2835_gpio_write(led_error, LOW);
+					gpio_write(led_error, 0);
 				}
 			}
 			if (led_packet != NOT_A_PIN) {
 				if (--led_packet_cnt==0) {
-					bcm2835_gpio_write(led_packet, LOW);
+					gpio_write(led_packet, 0);
 				}
 			}
 			
@@ -1929,7 +1941,7 @@ void thread_up(void) {
 				case STAT_CRC_OK:
 				  // Green led
 					led_packet_cnt=FETCH_SLEEP_MS*10;
-					bcm2835_gpio_write(led_packet, HIGH);
+					gpio_write(led_packet, 1);
 					meas_nb_rx_ok += 1;
 					if (!fwd_valid_pkt) {
 						pthread_mutex_unlock(&mx_meas_up);
@@ -1939,7 +1951,7 @@ void thread_up(void) {
 				case STAT_CRC_BAD:
 				  // Red led
 					led_error_cnt=FETCH_SLEEP_MS*10;
-					bcm2835_gpio_write(led_error, HIGH);
+					gpio_write(led_error, 1);
 					meas_nb_rx_bad += 1;
 					if (!fwd_error_pkt) {
 						pthread_mutex_unlock(&mx_meas_up);
@@ -1950,8 +1962,8 @@ void thread_up(void) {
 				  // Green and Red led
 					led_packet_cnt=FETCH_SLEEP_MS*10;
 					led_error_cnt=FETCH_SLEEP_MS*10; 
-					bcm2835_gpio_write(led_packet, HIGH);
-					bcm2835_gpio_write(led_error, HIGH);
+					gpio_write(led_packet, 1);
+					gpio_write(led_error, 1);
 					meas_nb_rx_nocrc += 1;
 					if (!fwd_nocrc_pkt) {
 						pthread_mutex_unlock(&mx_meas_up);
@@ -1961,7 +1973,7 @@ void thread_up(void) {
 				default:
 				  // Red led
 					led_error_cnt=FETCH_SLEEP_MS*10; 
-					bcm2835_gpio_write(led_error, HIGH);
+					gpio_write(led_error, 1);
 					MSG("WARNING: [up] received packet with unknown status %u (size %u, modulation %u, BW %u, DR %u, RSSI %.1f)\n", p->status, p->size, p->modulation, p->bandwidth, p->datarate, p->rssi);
 					pthread_mutex_unlock(&mx_meas_up);
 					continue; /* skip that packet */
@@ -2392,7 +2404,7 @@ void thread_down(void* pic) {
 		}
 		
 		if (led_down!=NOT_A_PIN) {
-			bcm2835_gpio_write(led_down, HIGH);
+			gpio_write(led_down, 1);
 		}
 		
 		/* generate random token for request */
@@ -2515,7 +2527,7 @@ void thread_down(void* pic) {
 					MSG("INFO: [down] for server %s, received out-of-sync ACK\n",serv_addr[ic]);
 				}
 				if (led_down!=NOT_A_PIN) {
-					bcm2835_gpio_write(led_down, LOW);
+					gpio_write(led_down, 0);
 				}
 
 				continue;
