@@ -72,13 +72,13 @@ for ic880a RPI plate (4 leds), configuration can be
   "led_down": 18,     /* GPIO18 White */
   "led_error": 23,    /* GPIO23 Red   */
   "led_packet": 24,   /* GPIO24 Green */
-  "reset_pin": 17,    /* GPIO17 concentrator reset */
+  "pin_reset": 17,    /* GPIO17 concentrator reset */
 
 ```
 
 And for RAK831 RPI Zero plate configuration can be (no led pins)
 ```json
-  "reset_pin": 25,    /* GPIO25 concentrator reset */
+  "pin_reset": 25,    /* GPIO25 concentrator reset */
 ```
 
   
