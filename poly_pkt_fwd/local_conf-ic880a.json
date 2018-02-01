@@ -16,7 +16,7 @@
         "fake_gps": true,
         "ref_latitude": 47.4288,
         "ref_longitude": 8.5412,
-        "ref_altitude": 440
+        "ref_altitude": 440,
         "contact_email": "ursm@gmx.net",
         "description": "Seebach-2",
     }
